@@ -8,6 +8,26 @@ A Python library for docking small molecules into kinases.
 
 The `DocKin` repository is used to play with different docking algorithms and to investigate their performance with focus on kinases.
 
+Integrated docking tools:
+
+- [OEDock](https://docs.eyesopen.com/toolkits/python/dockingtk/index.html) (license required)
+
+### Install
+
+1. Clone repository
+
+`git clone https://github.com/volkamerlab/DocKin.git`
+
+2. Create Conda environment
+
+`cd devtools/conda-envs`  
+`conda env create -f environment.yml`  
+`conda activate dockin`
+
+### Examples
+
+Jupyter notebooks are provided in the example directory providing a step-by-step guide on how to use implemented functions.
+
 ### Copyright
 
 Copyright (c) 2020, Volkamer Lab

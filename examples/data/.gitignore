@@ -1,0 +1,10 @@
+# python pickle
+*.pkl
+
+# structural files
+*.pdb
+*.sdf
+
+# csv file
+*.csv
+

@@ -4,7 +4,9 @@ Docking into Kinases
 """
 
 # Add imports here
-from .dockin import *
+from .oe_docking import get_structure_from_pdb, select_chain, select_altloc, select_ligand, prepare_complex, \
+    prepare_protein, create_complex_receptor, hybrid_docking
+from .utils import print_progress, protein_resnames
 
 # Handle versioneer
 from ._version import get_versions
