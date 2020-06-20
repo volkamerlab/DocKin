@@ -21,7 +21,7 @@ Integrated docking tools:
 2. Create Conda environment
 
 `cd devtools/conda-envs`  
-`conda env create -f environment.yml`  
+`conda env create -f env.yml`  
 `conda activate dockin`
 
 ### Examples
