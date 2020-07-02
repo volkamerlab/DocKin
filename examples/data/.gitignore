@@ -5,6 +5,8 @@
 *.pdb
 *.sdf
 
-# csv file
+# csv files
 *.csv
 
+# openeye files
+*.oeb

@@ -265,9 +265,9 @@ def prepare_protein(protein, protein_save_path=None):
     return protein
 
 
-def create_complex_receptor(protein, ligand, receptor_save_path=None):
+def create_hybrid_receptor(protein, ligand, receptor_save_path=None):
     """
-    Prepare a OEChem molecule holding a protein structure for docking.
+    Create a receptor for hybrid docking.
 
     Parameters
     ----------
@@ -297,6 +297,119 @@ def create_complex_receptor(protein, ligand, receptor_save_path=None):
     return receptor
 
 
+def create_hint_receptor(protein, hintx, hinty, hintz, receptor_save_path=None):
+    """
+    Create a hint receptor for docking.
+
+    Parameters
+    ----------
+    protein: oechem.OEGraphMol
+        An oechem.OEGraphMol object holding a prepared protein structure.
+
+    hintx: float or int
+        A number defining the hint x coordinate.
+
+    hinty: float or int
+        A number defining the hint y coordinate.
+
+    hintz: float or int
+        A number defining the hint z coordinate.
+
+    receptor_save_path: str
+        File path for saving created receptor. If receptor_save_path is not provided, receptor will not be saved.
+
+    Returns
+    -------
+    receptor: oechem.OEGraphMol
+        An oechem.OEGraphMol object holding a receptor with defined binding site via hint coordinates.
+    """
+
+    # create receptor
+    receptor = oechem.OEGraphMol()
+    oedocking.OEMakeReceptor(receptor, protein, hintx, hinty, hintz)
+
+    # save receptor
+    if receptor_save_path is not None:
+        oedocking.OEWriteReceptorFile(receptor, str(pathlib.Path(receptor_save_path).absolute()))
+
+    return receptor
+
+
+def create_box_receptor(protein, xmax, ymax, zmax, xmin, ymin, zmin, receptor_save_path=None):
+    """
+    Create a box receptor for docking.
+
+    Parameters
+    ----------
+    protein: oechem.OEGraphMol
+        An oechem.OEGraphMol object holding a prepared protein structure.
+
+    xmax: float or int
+        Maximal number in x direction.
+
+    ymax: float or int
+        Maximal number in y direction.
+
+    zmax: float or int
+        Maximal number in z direction.
+
+    xmin: float or int
+        Minimal number in x direction.
+
+    ymin: float or int
+        Minimal number in x direction.
+
+    zmin: float or int
+        Minimal number in z direction.
+
+    receptor_save_path: str
+        File path for saving created receptor. If receptor_save_path is not provided, receptor will not be saved.
+
+    Returns
+    -------
+    receptor: oechem.OEGraphMol
+        An oechem.OEGraphMol object holding a receptor with defined binding site via box dimensions.
+    """
+
+    # create receptor
+    box = oedocking.OEBox(xmax, ymax, zmax, xmin, ymin, zmin)
+    receptor = oechem.OEGraphMol()
+    oedocking.OEMakeReceptor(receptor, protein, box)
+
+    # save receptor
+    if receptor_save_path is not None:
+        oedocking.OEWriteReceptorFile(receptor, str(pathlib.Path(receptor_save_path).absolute()))
+
+    return receptor
+
+
+def get_mol_centroid(molecule):
+    """
+    Calculate the geometric center of a molecules heavy atom coordinates.
+
+    Parameters
+    ----------
+    molecule: oechem.OEGraphMol
+        An oechem.OEGraphMol object holding a molecule whos centroid should be calculated.
+
+    Returns
+    -------
+    centroid: tuple of float
+        The geometric centroid of the molecule based on heavy atom coordinates
+    """
+
+    coordinates = list(molecule.GetCoords().values())
+    atoms = list(molecule.GetAtoms())
+
+    x = [coordinate[0] for coordinate, atom in zip(coordinates, atoms) if atom.GetAtomicNum() != 1]
+    y = [coordinate[1] for coordinate, atom in zip(coordinates, atoms) if atom.GetAtomicNum() != 1]
+    z = [coordinate[2] for coordinate, atom in zip(coordinates, atoms) if atom.GetAtomicNum() != 1]
+
+    centroid = (sum(x) / len(coordinates), sum(y) / len(coordinates), sum(z) / len(coordinates))
+
+    return centroid
+
+
 def write_mols(molecules, file_path):
     """
     Save molecules to file.
@@ -309,16 +422,15 @@ def write_mols(molecules, file_path):
     file_path: str
         File path for saving molecules.
     """
-    with oechem.oemolostream() as ofs:
-        if ofs.open(file_path):
-            for molecules in molecules:
-                oechem.OEWriteMolecule(ofs, molecules)
+    with oechem.oemolostream(file_path) as ofs:
+        for molecule in molecules:
+            oechem.OEWriteMolecule(ofs, molecule)
     return
 
 
-def hybrid_docking(receptor, molecules, num_poses=1, docking_poses_save_path=None):
+def run_docking(receptor, molecules, dock_method, num_poses=1, docking_poses_save_path=None):
     """
-    Dock molecules into a prepared receptor holding protein and ligand structure.
+    Dock molecules into a prepared receptor.
 
     Parameters
     ----------
@@ -327,6 +439,9 @@ def hybrid_docking(receptor, molecules, num_poses=1, docking_poses_save_path=Non
 
     molecules: list of oechem.OEGraphMol
         A list of oechem.OEGraphMol objects holding prepared molecules for docking.
+
+    dock_method: int
+        Constant defining the docking method.
 
     num_poses: int
         Number of docking poses to generate per molecule.
@@ -340,16 +455,16 @@ def hybrid_docking(receptor, molecules, num_poses=1, docking_poses_save_path=Non
         A list of oechem.OEGraphMol objects holding the docked molecules.
     """
 
-    def score(molecule, field='Hybrid2'):
-        """Return the docking score."""
-        value = oechem.OEGetSDData(molecule, field)
-        return float(value)
-
     # initialize receptor
-    dock_method = oedocking.OEDockMethod_Hybrid2
+
     dock_resolution = oedocking.OESearchResolution_High
     dock = oedocking.OEDock(dock_method, dock_resolution)
     dock.Initialize(receptor)
+
+    def score(molecule, dock=dock):
+        """Return the docking score."""
+        value = oechem.OEGetSDData(molecule, dock.GetName())
+        return float(value)
 
     docked_molecules = list()
 
@@ -387,12 +502,11 @@ def hybrid_docking(receptor, molecules, num_poses=1, docking_poses_save_path=Non
                 continue
 
             # store docking data
-            sd_tag = oedocking.OEDockMethodGetName(dock_method)
-            oedocking.OESetSDScore(docked_mol, dock, sd_tag)
+            oedocking.OESetSDScore(docked_mol, dock, dock.GetName())
 
             # expand conformations
             for conformation in docked_mol.GetConfs():
-                docked_tautomers.append(conformation.CreateCopy())
+                docked_tautomers.append(oechem.OEGraphMol(conformation))
 
         # sort all conformations of all tautomers by score
         docked_tautomers.sort(key=score)
@@ -408,3 +522,108 @@ def hybrid_docking(receptor, molecules, num_poses=1, docking_poses_save_path=Non
         write_mols(docked_molecules, str(pathlib.Path(docking_poses_save_path).absolute()))
 
     return docked_molecules
+
+
+def hybrid_docking(hybrid_receptor, molecules, num_poses=1, docking_poses_save_path=None):
+    """
+    Dock molecules into a prepared receptor holding protein and ligand structure.
+
+    Parameters
+    ----------
+    hybrid_receptor: oechem.OEGraphMol
+        An oechem.OEGraphMol object holding the prepared receptor.
+
+    molecules: list of oechem.OEGraphMol
+        A list of oechem.OEGraphMol objects holding prepared molecules for docking.
+
+    num_poses: int
+        Number of docking poses to generate per molecule.
+
+    docking_poses_save_path: str
+        File path for saving docking poses. If docking_poses_save_path is not provided, docking poses will not be saved.
+
+    Returns
+    -------
+    docked_molecules: list of oechem.OEGraphMol
+        A list of oechem.OEGraphMol objects holding the docked molecules.
+    """
+
+    dock_method = oedocking.OEDockMethod_Hybrid2
+    docked_molecules = run_docking(hybrid_receptor, molecules, dock_method, num_poses, docking_poses_save_path)
+
+    return docked_molecules
+
+
+def chemgauss_docking(receptor, molecules, num_poses=1, docking_poses_save_path=None):
+    """
+    Dock molecules into a prepared receptor holding a protein structure.
+
+    Parameters
+    ----------
+    receptor: oechem.OEGraphMol
+        An oechem.OEGraphMol object holding the prepared hint or box receptor .
+
+    molecules: list of oechem.OEGraphMol
+        A list of oechem.OEGraphMol objects holding prepared molecules for docking.
+
+    num_poses: int
+        Number of docking poses to generate per molecule.
+
+    docking_poses_save_path: str
+        File path for saving docking poses. If docking_poses_save_path is not provided, docking poses will not be saved.
+
+    Returns
+    -------
+    docked_molecules: list of oechem.OEGraphMol
+        A list of oechem.OEGraphMol objects holding the docked molecules.
+    """
+
+    dock_method = oedocking.OEDockMethod_Chemgauss4
+    docked_molecules = run_docking(receptor, molecules, dock_method, num_poses, docking_poses_save_path)
+
+    return docked_molecules
+
+
+def superpose_proteins(reference_protein, fit_protein, superposed_protein_save_path=None):
+    """
+    Superpose a protein structure onto a reference protein.
+
+    Parameters
+    ----------
+    reference_protein: oechem.OEGraphMol
+        An oechem.OEGraphMol objects holding a protein structure which will be used as reference during superposition.
+
+    fit_protein: oechem.OEGraphMol
+        An oechem.OEGraphMol objects holding a protein structure which will be superposed onto the reference protein.
+
+    superposed_protein_save_path: str
+        File path for saving the superposed protein. If superposed_protein_save_path is not provided, the superpsoed
+        protein will not be saved.
+
+    Returns
+    -------
+    rmsd: float
+        The RMSD between the superposed structures.
+
+    superposed_protein: oechem.OEGraphMol
+        An oechem.OEGraphMol objects holding the superposed protein structure.
+    """
+
+    # do not modify input
+    superposed_protein = fit_protein.CreateCopy()
+
+    # set superposition method
+    options = oespruce.OESuperpositionOptions()
+    options.SetSuperpositionType(oespruce.OESuperpositionType_Global)
+
+    # perform superposition
+    superposition = oespruce.OEStructuralSuperposition(reference_protein, superposed_protein, options)
+    rmsd = superposition.GetRMSD()
+    superposition.Transform(superposed_protein)
+
+    # save superposed structure
+    if superposed_protein_save_path is not None:
+        with oechem.oemolostream(str(pathlib.Path(superposed_protein_save_path).absolute())) as ofs:
+            oechem.OEWriteMolecule(ofs, superposed_protein)
+
+    return rmsd, superposed_protein
