@@ -405,7 +405,7 @@ def get_mol_centroid(molecule):
     y = [coordinate[1] for coordinate, atom in zip(coordinates, atoms) if atom.GetAtomicNum() != 1]
     z = [coordinate[2] for coordinate, atom in zip(coordinates, atoms) if atom.GetAtomicNum() != 1]
 
-    centroid = (sum(x) / len(coordinates), sum(y) / len(coordinates), sum(z) / len(coordinates))
+    centroid = (sum(x) / len(x), sum(y) / len(y), sum(z) / len(z))
 
     return centroid
 
