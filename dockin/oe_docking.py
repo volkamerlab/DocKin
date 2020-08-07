@@ -1,20 +1,9 @@
 """This module contains functions to dock small molecules into proteins using the OpenEye toolkit."""
 
-# Standard libraries
-import pathlib
-import tempfile
-
-# External libraries
-from openeye import oechem, oespruce, oedocking, oequacpac, oeomega
-import requests
-
-# DocKin library
-from dockin.utils import protein_resnames
-
 
 def get_structure_from_pdb(pdb_id):
     """
-    Retrieve a structure from PDB and convert it into an OEChem molecule.
+    Retrieve a structure from PDB and convert it into an OpenEye molecule.
 
     Parameters
     ----------
@@ -26,30 +15,75 @@ def get_structure_from_pdb(pdb_id):
     mol: oechem.OEGraphMol
         An oechem.OEGraphMol object holding the structure retrieved from PDB.
     """
+    # Standard libraries
+    import tempfile
+
+    # External libraries
+    from openeye import oechem
+    import requests
 
     # get structure
-    url = f'https://files.rcsb.org/download/{pdb_id}.pdb'
+    url = f'https://files.rcsb.org/download/{pdb_id}.cif'
     response = requests.get(url)
 
     # store structure in temporary file
-    with tempfile.NamedTemporaryFile(suffix='.pdb') as temp_file:
+    with tempfile.NamedTemporaryFile(suffix='.cif') as temp_file:
         temp_file.write(response.content)
 
         # read structure from temporary file
         with oechem.oemolistream() as ifs:
-            ifs.SetFlavor(oechem.OEFormat_PDB,
-                          oechem.OEIFlavor_PDB_Default | oechem.OEIFlavor_PDB_DATA | oechem.OEIFlavor_PDB_ALTLOC)
+            ifs.SetFlavor(oechem.OEFormat_MMCIF, oechem.OEIFlavor_MMCIF_Default)
 
-            # Throw error if temporary file is not available
+            # Print error if temporary file is not available
             if not ifs.open(temp_file.name):
-                oechem.OEThrow.Fatal(f'Unable to open {temp_file.name} for reading.')
+                mol = None
+                print(f'Unable to open {temp_file.name} for PDB ID {pdb_id}. Returning None')
 
-            # Throw error if content of temporary file is not readable
+            # Print error if content of temporary file is not readable
             mol = oechem.OEGraphMol()
             if not oechem.OEReadMolecule(ifs, mol):
-                oechem.OEThrow.Fatal(f'Unable to read molecule from {temp_file.name}.')
+                mol = None
+                print(f'Unable to read molecule from {temp_file.name} for PDB ID {pdb_id}. Returning None.')
 
     return mol
+
+
+def get_electron_density_from_pdb(pdb_id):
+    """
+    Retrieve an electron density from PDB and convert it into an OpenEye grid.
+
+    Parameters
+    ----------
+    pdb_id: str
+        PDB ID.
+
+    Returns
+    -------
+    electron_density: oegrid.OESkewGrid
+        An oegrid.OESkewGrid object holding the electron density retrieved from PDB.
+    """
+    # Standard libraries
+    import tempfile
+
+    # External libraries
+    from openeye import oegrid
+    import requests
+
+    # get structure
+    url = f'https://edmaps.rcsb.org/coefficients/{pdb_id}.mtz'
+    response = requests.get(url)
+
+    # store structure in temporary file
+    with tempfile.NamedTemporaryFile(suffix='.mtz') as temp_file:
+        temp_file.write(response.content)
+
+        # read electron_density from temporary file
+        electron_density = oegrid.OESkewGrid()
+        if not oegrid.OEReadMTZ(temp_file.name, electron_density, oegrid.OEMTZMapType_Fwt):
+            electron_density = None
+            print(f'Unable to electron density from {temp_file.name} for PDB ID {pdb_id}. Returning None.')
+
+    return electron_density
 
 
 def select_chain(mol, chain_id):
@@ -69,6 +103,8 @@ def select_chain(mol, chain_id):
     selection: oechem.OEGraphMol
         An oechem.OEGraphMol object holding selected components.
     """
+    # External libraries
+    from openeye import oechem
 
     # do not change input mol
     selection = mol.CreateCopy()
@@ -99,6 +135,8 @@ def select_altloc(mol, altloc_id):
     selection: oechem.OEGraphMol
         An oechem.OEGraphMol object holding selected components.
     """
+    # External libraries
+    from openeye import oechem
 
     # do not change input mol
     selection = mol.CreateCopy()
@@ -131,6 +169,11 @@ def select_ligand(mol, ligand_id):
     selection: oechem.OEGraphMol
         An oechem.OEGraphMol object holding selected components.
     """
+    # External libraries
+    from openeye import oechem
+
+    # DocKin library
+    from dockin.utils import protein_resnames
 
     # do not change input mol
     selection = mol.CreateCopy()
@@ -146,7 +189,7 @@ def select_ligand(mol, ligand_id):
     return selection
 
 
-def prepare_complex(protein_ligand_complex, protein_save_path=None, ligand_save_path=None):
+def prepare_complex(protein_ligand_complex, electron_density=None, protein_save_path=None, ligand_save_path=None):
     """
     Prepare a OEChem molecule holding a protein ligand complex for docking.
 
@@ -154,6 +197,9 @@ def prepare_complex(protein_ligand_complex, protein_save_path=None, ligand_save_
     ----------
     protein_ligand_complex: oechem.OEGraphMol
         An oechem.OEGraphMol object holding a structure with protein and ligand.
+
+    electron_density: oegrid.OESkewGrid
+        An oegrid.OESkewGrid object holding the electron density.
 
     protein_save_path: str
         File path for saving prepared protein. If protein_save_path is not provided, protein will not be saved.
@@ -169,6 +215,11 @@ def prepare_complex(protein_ligand_complex, protein_save_path=None, ligand_save_
     ligand: oechem.OEGraphMol
         An oechem.OEGraphMol object holding a prepared ligand structure.
     """
+    # Standard libraries
+    import pathlib
+
+    # External libraries
+    from openeye import oechem, oespruce
 
     # pick alternate locations if defined in PDB file
     fact = oechem.OEAltLocationFactory(protein_ligand_complex)
@@ -183,7 +234,10 @@ def prepare_complex(protein_ligand_complex, protein_save_path=None, ligand_save_
 
     # create design units
     print('Identifying design units...')
-    design_units = list(oespruce.OEMakeDesignUnits(mol))
+    if electron_density is None:
+        design_units = list(oespruce.OEMakeDesignUnits(mol))
+    else:
+        design_units = list(oespruce.OEMakeDesignUnits(mol, electron_density))
     if len(design_units) == 1:
         design_unit = design_units[0]
     elif len(design_units) > 1:
@@ -230,6 +284,11 @@ def prepare_protein(protein, protein_save_path=None):
     protein: oechem.OEGraphMol
         An oechem.OEGraphMol object holding a prepared protein structure.
     """
+    # Standard libraries
+    import pathlib
+
+    # External libraries
+    from openeye import oechem, oespruce
 
     # pick alternate locations if defined in PDB file
     fact = oechem.OEAltLocationFactory(protein)
@@ -285,6 +344,11 @@ def create_hybrid_receptor(protein, ligand, receptor_save_path=None):
     receptor: oechem.OEGraphMol
         An oechem.OEGraphMol object holding a receptor with protein and ligand.
     """
+    # Standard libraries
+    import pathlib
+
+    # External libraries
+    from openeye import oechem, oedocking
 
     # create receptor
     receptor = oechem.OEGraphMol()
@@ -323,6 +387,11 @@ def create_hint_receptor(protein, hintx, hinty, hintz, receptor_save_path=None):
     receptor: oechem.OEGraphMol
         An oechem.OEGraphMol object holding a receptor with defined binding site via hint coordinates.
     """
+    # Standard libraries
+    import pathlib
+
+    # External libraries
+    from openeye import oechem, oedocking
 
     # create receptor
     receptor = oechem.OEGraphMol()
@@ -370,6 +439,11 @@ def create_box_receptor(protein, xmax, ymax, zmax, xmin, ymin, zmin, receptor_sa
     receptor: oechem.OEGraphMol
         An oechem.OEGraphMol object holding a receptor with defined binding site via box dimensions.
     """
+    # Standard libraries
+    import pathlib
+
+    # External libraries
+    from openeye import oechem, oedocking
 
     # create receptor
     box = oedocking.OEBox(xmax, ymax, zmax, xmin, ymin, zmin)
@@ -422,6 +496,9 @@ def write_mols(molecules, file_path):
     file_path: str
         File path for saving molecules.
     """
+    # External libraries
+    from openeye import oechem
+
     with oechem.oemolostream(file_path) as ofs:
         for molecule in molecules:
             oechem.OEWriteMolecule(ofs, molecule)
@@ -454,9 +531,13 @@ def run_docking(receptor, molecules, dock_method, num_poses=1, docking_poses_sav
     docked_molecules: list of oechem.OEGraphMol
         A list of oechem.OEGraphMol objects holding the docked molecules.
     """
+    # Standard libraries
+    import pathlib
+
+    # External libraries
+    from openeye import oechem, oedocking, oequacpac, oeomega
 
     # initialize receptor
-
     dock_resolution = oedocking.OESearchResolution_High
     dock = oedocking.OEDock(dock_method, dock_resolution)
     dock.Initialize(receptor)
@@ -547,6 +628,8 @@ def hybrid_docking(hybrid_receptor, molecules, num_poses=1, docking_poses_save_p
     docked_molecules: list of oechem.OEGraphMol
         A list of oechem.OEGraphMol objects holding the docked molecules.
     """
+    # External libraries
+    from openeye import oedocking
 
     dock_method = oedocking.OEDockMethod_Hybrid2
     docked_molecules = run_docking(hybrid_receptor, molecules, dock_method, num_poses, docking_poses_save_path)
@@ -577,6 +660,8 @@ def chemgauss_docking(receptor, molecules, num_poses=1, docking_poses_save_path=
     docked_molecules: list of oechem.OEGraphMol
         A list of oechem.OEGraphMol objects holding the docked molecules.
     """
+    # External libraries
+    from openeye import oedocking
 
     dock_method = oedocking.OEDockMethod_Chemgauss4
     docked_molecules = run_docking(receptor, molecules, dock_method, num_poses, docking_poses_save_path)
@@ -608,6 +693,11 @@ def superpose_proteins(reference_protein, fit_protein, superposed_protein_save_p
     superposed_protein: oechem.OEGraphMol
         An oechem.OEGraphMol objects holding the superposed protein structure.
     """
+    # Standard libraries
+    import pathlib
+
+    # External libraries
+    from openeye import oechem, oespruce
 
     # do not modify input
     superposed_protein = fit_protein.CreateCopy()

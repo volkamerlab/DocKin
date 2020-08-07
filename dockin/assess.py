@@ -1,9 +1,5 @@
 """This module contains functions to assess docking performance."""
 
-# External libraries
-from rdkit import Chem
-from rdkit.Chem import AllChem
-
 
 def rdkit_mols_from_sdf(file_path):
     """
@@ -19,6 +15,8 @@ def rdkit_mols_from_sdf(file_path):
     molecules: list of rdkit.Chem.rdchem.Mol
         List of read molecules.
     """
+    # External libraries
+    from rdkit import Chem
 
     molecules = list()
     supplier = Chem.SDMolSupplier(file_path)
@@ -44,6 +42,8 @@ def rmsds_from_sdfs(file_path_1, file_path_2):
     rmsds: list of float
         List of RMSD values for each pair of molecules stored in provided SDF files.
     """
+    # External libraries
+    from rdkit.Chem import AllChem
 
     # read SDF files
     poses1 = rdkit_mols_from_sdf(file_path_1)
