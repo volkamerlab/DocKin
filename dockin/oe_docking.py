@@ -23,16 +23,17 @@ def get_structure_from_pdb(pdb_id):
     import requests
 
     # get structure
-    url = f'https://files.rcsb.org/download/{pdb_id}.cif'
+    url = f'https://files.rcsb.org/download/{pdb_id}.pdb'
     response = requests.get(url)
 
     # store structure in temporary file
-    with tempfile.NamedTemporaryFile(suffix='.cif') as temp_file:
+    with tempfile.NamedTemporaryFile(suffix='.pdb') as temp_file:
         temp_file.write(response.content)
 
         # read structure from temporary file
         with oechem.oemolistream() as ifs:
-            ifs.SetFlavor(oechem.OEFormat_MMCIF, oechem.OEIFlavor_MMCIF_Default)
+            ifs.SetFlavor(oechem.OEFormat_PDB,
+                          oechem.OEIFlavor_PDB_Default | oechem.OEIFlavor_PDB_DATA | oechem.OEIFlavor_PDB_ALTLOC)
 
             # Print error if temporary file is not available
             if not ifs.open(temp_file.name):
@@ -189,7 +190,8 @@ def select_ligand(mol, ligand_id):
     return selection
 
 
-def prepare_complex(protein_ligand_complex, electron_density=None, protein_save_path=None, ligand_save_path=None):
+def prepare_complex(protein_ligand_complex, electron_density=None, loop_db=None, protein_save_path=None,
+                    ligand_save_path=None):
     """
     Prepare a OEChem molecule holding a protein ligand complex for docking.
 
@@ -200,6 +202,9 @@ def prepare_complex(protein_ligand_complex, electron_density=None, protein_save_
 
     electron_density: oegrid.OESkewGrid
         An oegrid.OESkewGrid object holding the electron density.
+
+    loop_db: str
+        File path for OpenEye Spruce loop database.
 
     protein_save_path: str
         File path for saving prepared protein. If protein_save_path is not provided, protein will not be saved.
@@ -221,30 +226,24 @@ def prepare_complex(protein_ligand_complex, electron_density=None, protein_save_
     # External libraries
     from openeye import oechem, oespruce
 
-    # pick alternate locations if defined in PDB file
-    fact = oechem.OEAltLocationFactory(protein_ligand_complex)
-    mol = oechem.OEGraphMol()
-    fact.MakePrimaryAltMol(mol)
-
-    # protonate complex
-    print('Re-optimizing hydrogen positions...')
-    opts = oechem.OEPlaceHydrogensOptions()
-    details = oechem.OEPlaceHydrogensDetails()
-    oechem.OEPlaceHydrogens(mol, details, opts)
-
     # create design units
-    print('Identifying design units...')
+    structure_metadata = oespruce.OEStructureMetadata()
+    design_unit_options = oespruce.OEMakeDesignUnitOptions()
+    if loop_db is not None:
+        design_unit_options.GetPrepOptions().GetBuildOptions().GetLoopBuilderOptions().SetLoopDBFilename(loop_db)
     if electron_density is None:
-        design_units = list(oespruce.OEMakeDesignUnits(mol))
+        design_units = list(oespruce.OEMakeDesignUnits(protein_ligand_complex, structure_metadata, design_unit_options))
     else:
-        design_units = list(oespruce.OEMakeDesignUnits(mol, electron_density))
+        design_units = list(oespruce.OEMakeDesignUnits(protein_ligand_complex, electron_density, structure_metadata,
+                                                       design_unit_options))
     if len(design_units) == 1:
         design_unit = design_units[0]
     elif len(design_units) > 1:
         print('More than one design unit found---using first one')
         design_unit = design_units[0]
     else:
-        raise Exception('No design units found')
+        print('No design units found')
+        return None, None
 
     # get protein
     protein = oechem.OEGraphMol()
@@ -267,7 +266,7 @@ def prepare_complex(protein_ligand_complex, electron_density=None, protein_save_
     return protein, ligand
 
 
-def prepare_protein(protein, protein_save_path=None):
+def prepare_protein(protein, loop_db=None, protein_save_path=None):
     """
     Prepare a OEChem molecule holding a protein structure for docking.
 
@@ -275,6 +274,9 @@ def prepare_protein(protein, protein_save_path=None):
     ----------
     protein: oechem.OEGraphMol
         An oechem.OEGraphMol object holding a structure with protein.
+
+    loop_db: str
+        File path for OpenEye Spruce loop database.
 
     protein_save_path: str
         File path for saving prepared protein. If protein_save_path is not provided, protein will not be saved.
@@ -290,27 +292,20 @@ def prepare_protein(protein, protein_save_path=None):
     # External libraries
     from openeye import oechem, oespruce
 
-    # pick alternate locations if defined in PDB file
-    fact = oechem.OEAltLocationFactory(protein)
-    mol = oechem.OEGraphMol()
-    fact.MakePrimaryAltMol(mol)
-
-    # protonate complex
-    print('Re-optimizing hydrogen positions...')
-    opts = oechem.OEPlaceHydrogensOptions()
-    describe = oechem.OEPlaceHydrogensDetails()
-    oechem.OEPlaceHydrogens(mol, describe, opts)
-
     # create bio design units
-    print('Identifying bio design units...')
-    bio_design_units = list(oespruce.OEMakeBioDesignUnits(mol))
+    structure_metadata = oespruce.OEStructureMetadata()
+    design_unit_options = oespruce.OEMakeDesignUnitOptions()
+    if loop_db is not None:
+        design_unit_options.GetPrepOptions().GetBuildOptions().GetLoopBuilderOptions().SetLoopDBFilename(loop_db)
+    bio_design_units = list(oespruce.OEMakeBioDesignUnits(protein, structure_metadata, design_unit_options))
     if len(bio_design_units) == 1:
         bio_design_unit = bio_design_units[0]
     elif len(bio_design_units) > 1:
         print('More than one design unit found---using first one')
         bio_design_unit = bio_design_units[0]
     else:
-        raise Exception('No design units found')
+        print('No design units found')
+        return None
 
     # get protein
     protein = oechem.OEGraphMol()
