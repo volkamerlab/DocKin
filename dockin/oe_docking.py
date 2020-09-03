@@ -22,29 +22,47 @@ def get_structure_from_pdb(pdb_id):
     from openeye import oechem
     import requests
 
-    # get structure
-    url = f'https://files.rcsb.org/download/{pdb_id}.pdb'
-    response = requests.get(url)
+    def request_structure(pdb_id, file_format):
 
-    # store structure in temporary file
-    with tempfile.NamedTemporaryFile(suffix='.pdb') as temp_file:
-        temp_file.write(response.content)
+        # request structure
+        if file_format == 'mmcif':
+            url = f'https://files.rcsb.org/download/{pdb_id}.cif'
+        elif file_format == 'pdb':
+            url = f'https://files.rcsb.org/download/{pdb_id}.pdb'
+        else:
+            print(f'Unsupported file format: {file_format}. Returning None')
+            return None
+        response = requests.get(url)
 
-        # read structure from temporary file
-        with oechem.oemolistream() as ifs:
-            ifs.SetFlavor(oechem.OEFormat_PDB,
-                          oechem.OEIFlavor_PDB_Default | oechem.OEIFlavor_PDB_DATA | oechem.OEIFlavor_PDB_ALTLOC)
+        # store structure in temporary file
+        with tempfile.NamedTemporaryFile(suffix='.' + file_format) as temp_file:
+            temp_file.write(response.content)
 
-            # Print error if temporary file is not available
-            if not ifs.open(temp_file.name):
-                mol = None
-                print(f'Unable to open {temp_file.name} for PDB ID {pdb_id}. Returning None')
+            # read structure from temporary file
+            with oechem.oemolistream() as ifs:
+                if file_format == 'mmcif':
+                    ifs.SetFlavor(oechem.OEFormat_MMCIF, oechem.OEIFlavor_MMCIF_Default)
+                elif file_format == 'pdb':
+                    ifs.SetFlavor(oechem.OEFormat_PDB,
+                        oechem.OEIFlavor_PDB_Default | oechem.OEIFlavor_PDB_DATA | oechem.OEIFlavor_PDB_ALTLOC)
+                else:
+                    print(f'Unsupported file format: {file_format}. Returning None')
+                    return None
 
-            # Print error if content of temporary file is not readable
-            mol = oechem.OEGraphMol()
-            if not oechem.OEReadMolecule(ifs, mol):
-                mol = None
-                print(f'Unable to read molecule from {temp_file.name} for PDB ID {pdb_id}. Returning None.')
+                ifs.open(temp_file.name)
+                mol = oechem.OEGraphMol()
+                if not oechem.OEReadMolecule(ifs, mol):
+                    mol = None
+
+        return mol
+
+    mol = request_structure(pdb_id, file_format='pdb')
+
+    if mol is None:
+        mol = request_structure(pdb_id, file_format='mmcif')
+
+    if mol is None:
+        print(f'Unable to retrieve molecule for PDB ID {pdb_id}. Returning None.')
 
     return mol
 
