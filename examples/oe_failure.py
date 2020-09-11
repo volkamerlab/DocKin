@@ -1,14 +1,13 @@
 # Standard libraries
 import argparse
+import math
 import multiprocessing
 import pathlib
 
 # External libraries
 import klifs_utils
-from openeye import oechem
 
 # DocKin library
-from dockin.assess import rmsds_from_sdfs
 from dockin.oe_docking import get_structure_from_pdb, select_chain, select_altloc, select_ligand, prepare_complex, \
     create_hybrid_receptor, hybrid_docking
 
@@ -19,22 +18,10 @@ def redocking(jobs):
 
     Parameters
     ----------
-    jobs: multiprocessing.manager.list of pd.Series
-        List of pandas series containing the information to run the docking.
-
-    log_file: str
-        Path to file for wrinting log messages.
-
-    jobs_number:
-        Total number of jobs to run
+    jobs: pd.Dataframe
+        Pandas dataframe containing the information to run the docking.
     """
-
-    while jobs:
-        # run docking jobs until jobs list is empty
-        try:
-            job = jobs.pop(0)
-        except IndexError:
-            break
+    for i, job in jobs.iterrows():
         # perform docking and catch any error
         try:
             pdb_id = job['pdb']
@@ -53,6 +40,15 @@ def redocking(jobs):
         except:  # not PEP8, but want to catch any error
             continue
     return
+
+
+def jobs_to_chunks(jobs_df, worker_number):
+    chunks = []
+    for i in range(worker_number):
+        chunk_jobs_number = math.ceil(len(jobs_df) / (worker_number - i))
+        chunks.append(jobs_df.iloc[0:chunk_jobs_number])
+        jobs_df = jobs_df.iloc[chunk_jobs_number:]
+    return chunks
 
 
 if __name__ == "__main__":
@@ -91,13 +87,10 @@ if __name__ == "__main__":
     kinase_df.to_csv(CWD / 'data/re_docking_data.csv')
 
     # crating shareable jobs list
-    manager = multiprocessing.Manager()
-    jobs = manager.list()
-    for index, row in kinase_df.iterrows():
-        jobs.append(row)
+    chunks = jobs_to_chunks(kinase_df, num_processes)
 
     # starting jobs on separate processes
-    processes = [multiprocessing.Process(target=redocking, args=(jobs,)) for process_counter in range(num_processes)]
+    processes = [multiprocessing.Process(target=redocking, args=(chunk,)) for chunk in chunks]
     for process in processes:
         process.start()
     for process in processes:
